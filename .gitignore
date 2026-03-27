@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Weights & Biases
+wandb/
+
+# Data / model artifacts
+*.pth
+*.pt
+glove.6B.*
+
+# macOS
+.DS_Store
+
+# IDE / Claude
+.claude/
+.vscode/
+.idea/
+
+# HuggingFace cache (if downloaded locally)
+~/.cache/huggingface/
+
+# Results (keep figures dir but not generated files)
+results/figures/*.png
+results/figures/*.pdf
