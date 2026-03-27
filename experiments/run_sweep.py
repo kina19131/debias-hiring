@@ -6,6 +6,8 @@ Usage:
 """
 
 import argparse
+import gc
+import logging
 import sys
 import os
 
@@ -70,6 +72,7 @@ def run_experiment(
         lr=lr,
         wandb_project=wandb_project,
         seed=seed,
+        adversary_type=adversary_type,
     )
 
 
@@ -94,8 +97,17 @@ def main():
     )
     args = parser.parse_args()
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(f"sweep_{args.adversary_type}.log"),
+        ],
+    )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}  adversary: {args.adversary_type}")
+    logging.info(f"Device: {device}  adversary: {args.adversary_type}")
 
     train_loader, valid_loader, _, vocab, id2profession = load_bios(
         batch_size=args.batch_size,
@@ -105,7 +117,7 @@ def main():
 
     results = {}
     for lam in LAMBDA_VALUES:
-        results[lam] = run_experiment(
+        r = run_experiment(
             lambda_val=lam,
             train_loader=train_loader,
             valid_loader=valid_loader,
@@ -120,11 +132,17 @@ def main():
             seed=args.seed,
             adversary_type=args.adversary_type,
         )
+        # Store only metrics — drop model objects so GPU memory is freed
+        results[lam] = {k: v for k, v in r.items() if k not in ("model", "adversary")}
+        del r
+        gc.collect()
+        torch.cuda.empty_cache()
+        logging.info(f"λ={lam} done. GPU cache cleared.")
 
-    print(f"\n=== Sweep Summary ({args.adversary_type}) ===")
-    print(f"{'lambda':>8}  {'val_acc':>8}  {'tpr_gap':>8}  {'odd_gap':>8}")
+    logging.info(f"\n=== Sweep Summary ({args.adversary_type}) ===")
+    logging.info(f"{'lambda':>8}  {'val_acc':>8}  {'tpr_gap':>8}  {'odd_gap':>8}")
     for lam, r in results.items():
-        print(
+        logging.info(
             f"{lam:>8.2f}  {r['val_clf_accuracy']:>8.4f}  "
             f"{r['median_tpr_gap']:>8.4f}  {r['median_odd_gap']:>8.4f}"
         )

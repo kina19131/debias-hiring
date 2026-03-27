@@ -2,8 +2,11 @@
 Main training loop: GRUClassifier + label-conditioned adversary with gradient reversal.
 """
 
+import json
+import logging
 import os
 import random
+import time
 
 import numpy as np
 import torch
@@ -77,14 +80,6 @@ def evaluate_adversary(model, adversary, dataloader, device) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------------
-
-def _build_tag(lambda_adv: float) -> str:
-    return "baseline" if lambda_adv == 0 else f"adv_{lambda_adv:.2f}"
-
-
-# ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------
 
@@ -101,6 +96,8 @@ def train(
     lr: float = 1e-3,
     wandb_project: str = "debias-hiring",
     seed: int = 42,
+    adversary_type: str = "label_conditioned",
+    log_every: int = 200,
 ) -> dict:
     """
     Train GRUClassifier with the label-conditioned adversary.
@@ -113,9 +110,10 @@ def train(
     """
     set_seed(seed)
 
-    tag = _build_tag(max_lambda)
+    tag = f"{adversary_type}_{'baseline' if max_lambda == 0 else f'lam{max_lambda:.2f}'}"
     run = wandb.init(
         project=wandb_project,
+        name=tag,
         config=dict(
             epochs=epochs,
             batch_size=train_loader.batch_size,
@@ -125,6 +123,7 @@ def train(
             warmup_epochs=warmup_epochs,
             lr=lr,
             seed=seed,
+            adversary_type=adversary_type,
         ),
         reinit="finish_previous",
     )
@@ -137,6 +136,8 @@ def train(
 
     best_eo_gap = float("inf")
     best_state = None
+    global_step = 0
+    epoch_log = []  # accumulates one dict per epoch for the JSONL file
 
     for epoch in range(epochs):
         lambda_val = min(max_lambda, (epoch / max(warmup_epochs, 1)) * max_lambda)
@@ -145,8 +146,9 @@ def train(
 
         tot_clf_loss = tot_adv_loss = 0.0
         tot_clf_ok = tot_adv_ok = tot = 0
+        epoch_start = time.time()
 
-        for batch in tqdm(train_loader, desc=f"[{tag}] epoch {epoch + 1}/{epochs}"):
+        for step, batch in enumerate(tqdm(train_loader, desc=f"[{tag}] epoch {epoch + 1}/{epochs}")):
             input_ids = batch["input_ids"].to(device)
             y_clf = batch["label"].to(device)
             y_adv = batch["gender"].float().to(device)
@@ -183,6 +185,15 @@ def train(
                 tot_adv_loss += adv_loss.item()
                 adv_preds = (gender_logits > 0).float()
                 tot_adv_ok += (adv_preds == y_adv).sum().item()
+
+            global_step += 1
+            if global_step % log_every == 0:
+                run.log({
+                    "step_clf_loss": clf_loss.item(),
+                    "step_adv_loss": adv_loss.item() if lambda_val > 0 else 0.0,
+                    "step_clf_acc": (logits.argmax(1) == y_clf).float().mean().item(),
+                    "lambda_adv": lambda_val,
+                }, step=global_step)
 
         # ------------------------------------------------------------------
         # Validation
@@ -226,6 +237,31 @@ def train(
             prof_logs[f"prof_{s['profession']}_TPR_diff"] = s["TPR_diff"]
         for s in eodd_stats:
             prof_logs[f"prof_{s['profession']}_Odd_gap"] = s["Odd_gap"]
+
+        epoch_secs = time.time() - epoch_start
+        epoch_metrics = {
+            "tag": tag,
+            "adversary_type": adversary_type,
+            "lambda_adv": lambda_val,
+            "epoch": epoch + 1,
+            "epoch_secs": round(epoch_secs, 1),
+            "train_clf_loss": round(tot_clf_loss / len(train_loader), 6),
+            "train_adv_loss": round(tot_adv_loss / max(1, len(train_loader)), 6),
+            "train_clf_accuracy": round(tot_clf_ok / tot, 6),
+            "train_adv_accuracy": round((tot_adv_ok / tot) if lambda_val > 0 else 0.0, 6),
+            "val_clf_accuracy": round(val_acc, 6),
+            "val_adv_accuracy": round(val_adv_acc, 6),
+            "val_clf_loss": round(val_clf_loss, 6),
+            "median_opp_gap": round(float(median_tpr_gap), 6),
+            "median_odds_gap": round(float(median_odd_gap), 6),
+        }
+        epoch_log.append(epoch_metrics)
+
+        logging.info(
+            f"[{tag}] epoch {epoch+1}/{epochs} | "
+            f"val_acc={val_acc:.4f} | tpr_gap={median_tpr_gap:.4f} | "
+            f"odd_gap={median_odd_gap:.4f} | {epoch_secs:.0f}s"
+        )
 
         run.log({
             "lambda_adv": lambda_val,
@@ -277,6 +313,14 @@ def train(
     artifact.add_file(ckpt_path)
     run.log_artifact(artifact, aliases=["latest", tag])
     os.remove(ckpt_path)
+
+    # Write structured epoch log — share this file to inspect results
+    jsonl_path = f"{tag}_epochs.jsonl"
+    with open(jsonl_path, "w") as f:
+        for row in epoch_log:
+            f.write(json.dumps(row) + "\n")
+    logging.info(f"Epoch log written to {jsonl_path}")
+
     run.finish()
 
     return {
