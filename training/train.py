@@ -126,7 +126,7 @@ def train(
             lr=lr,
             seed=seed,
         ),
-        reinit=True,
+        reinit="finish_previous",
     )
 
     clf_crit = build_clf_criterion(train_loader, device)
@@ -228,7 +228,6 @@ def train(
             prof_logs[f"prof_{s['profession']}_Odd_gap"] = s["Odd_gap"]
 
         run.log({
-            "epoch": epoch + 1,
             "lambda_adv": lambda_val,
             "train_clf_loss": tot_clf_loss / len(train_loader),
             "train_adv_loss": tot_adv_loss / max(1, len(train_loader)),
@@ -240,7 +239,7 @@ def train(
             "median_opp_gap": median_tpr_gap,
             "median_odds_gap": median_odd_gap,
             **prof_logs,
-        })
+        }, step=epoch + 1)
 
         # Track best model by TPR gap
         if median_tpr_gap < best_eo_gap:
