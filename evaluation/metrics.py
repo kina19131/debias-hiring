@@ -66,7 +66,7 @@ def compute_equalized_opps(
             "FPR_female": fprs[1],
             "TPR_diff": abs(tprs[1] - tprs[0]),
             "FPR_diff": abs(fprs[1] - fprs[0]),
-            "Odd_gap": abs(tprs[1] - tprs[0]) + abs(fprs[1] - fprs[0]),
+            "Odd_gap": 0.5 * (abs(tprs[1] - tprs[0]) + abs(fprs[1] - fprs[0])),
             "Odd_previlaged_gender": "female" if (tprs[1] + fprs[1]) > (tprs[0] + fprs[0]) else "male",
         })
 

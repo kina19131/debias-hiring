@@ -299,8 +299,8 @@ def train(
             **prof_logs,
         })
 
-        # Track best model by TPR gap
-        if median_tpr_gap < best_eo_gap:
+        # Track best model by TPR gap — require val_acc > 10% to exclude collapsed models
+        if median_tpr_gap < best_eo_gap and val_acc > 0.10:
             best_eo_gap = median_tpr_gap
             best_state = {
                 "model": {k: v.cpu() for k, v in model.state_dict().items()},
