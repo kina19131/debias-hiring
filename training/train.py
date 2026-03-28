@@ -130,6 +130,7 @@ def train(
 
     # Tell W&B which metrics to plot against epoch and which direction is better
     run.define_metric("epoch")
+    run.define_metric("global_step")
     for m in [
         "val_clf_accuracy", "val_clf_loss",
         "train_clf_loss", "train_adv_loss",
@@ -139,6 +140,8 @@ def train(
         "lambda_adv",
     ]:
         run.define_metric(m, step_metric="epoch")
+    for m in ["step_clf_loss", "step_adv_loss", "step_clf_acc"]:
+        run.define_metric(m, step_metric="global_step")
     run.define_metric("median_opp_gap",  step_metric="epoch", summary="min")
     run.define_metric("median_odds_gap", step_metric="epoch", summary="min")
     run.define_metric("val_clf_accuracy", step_metric="epoch", summary="max")
@@ -205,11 +208,11 @@ def train(
             global_step += 1
             if global_step % log_every == 0:
                 run.log({
+                    "global_step": global_step,
                     "step_clf_loss": clf_loss.item(),
                     "step_adv_loss": adv_loss.item() if lambda_val > 0 else 0.0,
                     "step_clf_acc": (logits.argmax(1) == y_clf).float().mean().item(),
-                    "lambda_adv": lambda_val,
-                }, step=global_step)
+                })
 
         # ------------------------------------------------------------------
         # Validation
@@ -280,6 +283,7 @@ def train(
         )
 
         run.log({
+            "epoch": epoch + 1,
             "lambda_adv": lambda_val,
             "train_clf_loss": tot_clf_loss / len(train_loader),
             "train_adv_loss": tot_adv_loss / max(1, len(train_loader)),
@@ -291,7 +295,7 @@ def train(
             "median_opp_gap": median_tpr_gap,
             "median_odds_gap": median_odd_gap,
             **prof_logs,
-        }, step=epoch + 1)
+        })
 
         # Track best model by TPR gap
         if median_tpr_gap < best_eo_gap:

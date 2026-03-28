@@ -71,11 +71,11 @@ class BiosDataset(Dataset):
 
 
 def process_split(raw_dataset, vocab: dict[str, int], max_len: int = 256) -> BiosDataset:
-    texts = raw_dataset["hard_text"]
+    texts = list(raw_dataset["hard_text"])
     tokenized = [basic_tokenizer(t) for t in texts]
     input_ids = [tokens_to_ids(t, vocab, max_len) for t in tokenized]
-    labels = raw_dataset["profession"]
-    genders = raw_dataset["gender"] if "gender" in raw_dataset.column_names else None
+    labels = list(raw_dataset["profession"])
+    genders = list(raw_dataset["gender"]) if "gender" in raw_dataset.column_names else None
     return BiosDataset(input_ids=input_ids, labels=labels, texts=texts, genders=genders)
 
 
