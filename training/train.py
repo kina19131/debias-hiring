@@ -128,6 +128,22 @@ def train(
         reinit="finish_previous",
     )
 
+    # Tell W&B which metrics to plot against epoch and which direction is better
+    run.define_metric("epoch")
+    for m in [
+        "val_clf_accuracy", "val_clf_loss",
+        "train_clf_loss", "train_adv_loss",
+        "train_clf_accuracy", "train_adv_accuracy",
+        "val_adv_accuracy",
+        "median_opp_gap", "median_odds_gap",
+        "lambda_adv",
+    ]:
+        run.define_metric(m, step_metric="epoch")
+    run.define_metric("median_opp_gap",  step_metric="epoch", summary="min")
+    run.define_metric("median_odds_gap", step_metric="epoch", summary="min")
+    run.define_metric("val_clf_accuracy", step_metric="epoch", summary="max")
+    run.define_metric("val_adv_accuracy", step_metric="epoch", summary="min")
+
     clf_crit = build_clf_criterion(train_loader, device)
     adv_crit = build_adv_criterion()
 
@@ -313,6 +329,14 @@ def train(
     artifact.add_file(ckpt_path)
     run.log_artifact(artifact, aliases=["latest", tag])
     os.remove(ckpt_path)
+
+    # Surface best-checkpoint values in the W&B runs table
+    run.summary["best_median_opp_gap"]  = best_eo_gap
+    run.summary["best_epoch"]           = best_state["epoch"] + 1
+    run.summary["final_val_clf_accuracy"] = val_acc
+    run.summary["final_val_adv_accuracy"] = val_adv_acc
+    run.summary["final_median_opp_gap"]   = median_tpr_gap
+    run.summary["final_median_odds_gap"]  = median_odd_gap
 
     # Write structured epoch log — share this file to inspect results
     jsonl_path = f"{tag}_epochs.jsonl"
