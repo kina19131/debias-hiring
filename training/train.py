@@ -128,24 +128,24 @@ def train(
         reinit="finish_previous",
     )
 
-    # Tell W&B which metrics to plot against epoch and which direction is better
+    # Epoch-level metrics: x-axis = epoch
     run.define_metric("epoch")
+    run.define_metric("val_clf_accuracy",   step_metric="epoch", summary="max")
+    run.define_metric("val_clf_loss",       step_metric="epoch", summary="min")
+    run.define_metric("val_adv_accuracy",   step_metric="epoch", summary="min")
+    run.define_metric("train_clf_loss",     step_metric="epoch", summary="min")
+    run.define_metric("train_adv_loss",     step_metric="epoch", summary="min")
+    run.define_metric("train_clf_accuracy", step_metric="epoch", summary="max")
+    run.define_metric("train_adv_accuracy", step_metric="epoch")
+    run.define_metric("median_opp_gap",     step_metric="epoch", summary="min")
+    run.define_metric("median_odds_gap",    step_metric="epoch", summary="min")
+    run.define_metric("lambda_adv",         step_metric="epoch")
+
+    # Step-level metrics: x-axis = global_step
     run.define_metric("global_step")
-    for m in [
-        "val_clf_accuracy", "val_clf_loss",
-        "train_clf_loss", "train_adv_loss",
-        "train_clf_accuracy", "train_adv_accuracy",
-        "val_adv_accuracy",
-        "median_opp_gap", "median_odds_gap",
-        "lambda_adv",
-    ]:
-        run.define_metric(m, step_metric="epoch")
-    for m in ["step_clf_loss", "step_adv_loss", "step_clf_acc"]:
-        run.define_metric(m, step_metric="global_step")
-    run.define_metric("median_opp_gap",  step_metric="epoch", summary="min")
-    run.define_metric("median_odds_gap", step_metric="epoch", summary="min")
-    run.define_metric("val_clf_accuracy", step_metric="epoch", summary="max")
-    run.define_metric("val_adv_accuracy", step_metric="epoch", summary="min")
+    run.define_metric("step_clf_loss", step_metric="global_step")
+    run.define_metric("step_adv_loss", step_metric="global_step")
+    run.define_metric("step_clf_acc",  step_metric="global_step")
 
     clf_crit = build_clf_criterion(train_loader, device)
     adv_crit = build_adv_criterion()
