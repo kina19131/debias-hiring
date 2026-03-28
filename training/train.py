@@ -94,6 +94,7 @@ def train(
     epochs: int = 10,
     warmup_epochs: int = 5,
     lr: float = 1e-3,
+    lr_adv: float = 1e-4,
     wandb_project: str = "debias-hiring",
     seed: int = 42,
     adversary_type: str = "label_conditioned",
@@ -122,6 +123,7 @@ def train(
             lambda_adv=max_lambda,
             warmup_epochs=warmup_epochs,
             lr=lr,
+            lr_adv=lr_adv,
             seed=seed,
             adversary_type=adversary_type,
         ),
@@ -151,7 +153,7 @@ def train(
     adv_crit = build_adv_criterion()
 
     optim_clf = torch.optim.Adam(model.parameters(), lr=lr)
-    optim_adv = torch.optim.Adam(adversary.parameters(), lr=lr)
+    optim_adv = torch.optim.Adam(adversary.parameters(), lr=lr_adv)
 
     best_eo_gap = float("inf")
     best_state = None

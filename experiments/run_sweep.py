@@ -35,6 +35,7 @@ def run_experiment(
     epochs: int,
     warmup_epochs: int,
     lr: float,
+    lr_adv: float,
     glove_path: str,
     wandb_project: str,
     seed: int,
@@ -70,6 +71,7 @@ def run_experiment(
         epochs=epochs,
         warmup_epochs=warmup_epochs,
         lr=lr,
+        lr_adv=lr_adv,
         wandb_project=wandb_project,
         seed=seed,
         adversary_type=adversary_type,
@@ -81,6 +83,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--warmup-epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr-adv", type=float, default=1e-4,
+                        help="Adversary learning rate. Lower than --lr to prevent classifier collapse.")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-len", type=int, default=256,
                         help="Token sequence length. Use 64 for fast CPU dev runs.")
@@ -127,6 +131,7 @@ def main():
             epochs=args.epochs,
             warmup_epochs=args.warmup_epochs,
             lr=args.lr,
+            lr_adv=args.lr_adv,
             glove_path=args.glove_path,
             wandb_project=args.wandb_project,
             seed=args.seed,
