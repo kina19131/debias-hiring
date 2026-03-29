@@ -36,17 +36,22 @@ def set_seed(seed: int = 42) -> None:
 # Evaluation helpers
 # ---------------------------------------------------------------------------
 
+def _forward(model, batch, device):
+    """Pass input_ids + attention_mask to the model (works for both DistilBERT and GRU)."""
+    input_ids = batch["input_ids"].to(device, non_blocking=True)
+    attn = batch["attention_mask"].to(device, non_blocking=True)
+    return model(input_ids, attn)
+
+
 def evaluate(model, dataloader, device) -> float:
     model.eval()
     correct = total = 0
     with torch.no_grad():
         for batch in dataloader:
-            input_ids = batch["input_ids"].to(device, non_blocking=True)
             labels = batch["label"].to(device, non_blocking=True)
-            logits, _ = model(input_ids)
+            logits, _ = _forward(model, batch, device)
             correct += (logits.argmax(1) == labels).sum().item()
             total += labels.size(0)
-            del input_ids, labels, logits
     return correct / total
 
 
@@ -55,9 +60,8 @@ def evaluate_loss(model, dataloader, criterion, device) -> float:
     total_loss = total = 0
     with torch.no_grad():
         for batch in dataloader:
-            input_ids = batch["input_ids"].to(device)
             labels = batch["label"].to(device)
-            logits, _ = model(input_ids)
+            logits, _ = _forward(model, batch, device)
             total_loss += criterion(logits, labels).item() * labels.size(0)
             total += labels.size(0)
     return total_loss / total
@@ -69,10 +73,9 @@ def evaluate_adversary(model, adversary, dataloader, device) -> float:
     correct = total = 0
     with torch.no_grad():
         for batch in dataloader:
-            input_ids = batch["input_ids"].to(device)
             genders = batch["gender"].float().to(device)
             labels = batch["label"].to(device)
-            _, h = model(input_ids)
+            _, h = _forward(model, batch, device)
             preds = (adversary(h, labels) > 0).float()
             correct += (preds == genders).sum().item()
             total += genders.size(0)
@@ -169,15 +172,16 @@ def train(
         tot_clf_ok = tot_adv_ok = tot = 0
         epoch_start = time.time()
 
-        for step, batch in enumerate(tqdm(train_loader, desc=f"[{tag}] epoch {epoch + 1}/{epochs}")):
+        for batch in tqdm(train_loader, desc=f"[{tag}] epoch {epoch + 1}/{epochs}"):
             input_ids = batch["input_ids"].to(device)
+            attn = batch["attention_mask"].to(device)
             y_clf = batch["label"].to(device)
             y_adv = batch["gender"].float().to(device)
 
             optim_clf.zero_grad()
             optim_adv.zero_grad()
 
-            logits, h = model(input_ids)
+            logits, h = model(input_ids, attn)
             clf_loss = clf_crit(logits, y_clf)
 
             if lambda_val == 0:
@@ -228,10 +232,9 @@ def train(
         model.eval()
         with torch.no_grad():
             for batch in valid_loader:
-                input_ids = batch["input_ids"].to(device)
                 y_clf = batch["label"].to(device)
                 y_gender = batch["gender"].to(device)
-                logits, _ = model(input_ids)
+                logits, _ = _forward(model, batch, device)
                 y_true_all.append(y_clf)
                 y_pred_all.append(logits.argmax(1))
                 gender_all.append(y_gender)
