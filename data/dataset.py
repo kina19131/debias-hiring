@@ -123,9 +123,55 @@ ID2PROFESSION = {
 }
 
 
+def verify_dataset(split="train", n_examples: int = 3) -> None:
+    """
+    Sanity-check the dataset before training:
+      1. Confirm profession ClassLabel order matches ID2PROFESSION
+      2. Show hard_text samples to confirm pronouns/names are scrubbed
+      3. Print split sizes
+    """
+    import re
+    ds = load_dataset("LabHC/bias_in_bios", split=split)
+
+    # --- 1. Profession label mapping ---
+    hf_names = ds.features["profession"].names  # HuggingFace ClassLabel order
+    mismatches = []
+    for idx, name in enumerate(hf_names):
+        expected = ID2PROFESSION.get(idx, "MISSING")
+        if name != expected:
+            mismatches.append(f"  id={idx}: HF='{name}' vs code='{expected}'")
+
+    print("=== Profession label verification ===")
+    if mismatches:
+        print("MISMATCH — ID2PROFESSION is wrong! Fix before running experiments:")
+        for m in mismatches:
+            print(m)
+    else:
+        print(f"OK — all {len(hf_names)} profession labels match ID2PROFESSION")
+
+    # --- 2. hard_text pronoun check ---
+    PRONOUNS = re.compile(r'\b(he|she|his|her|him|himself|herself|they|their|them)\b', re.I)
+    print("\n=== hard_text samples (should have no gendered pronouns) ===")
+    for i in range(min(n_examples, len(ds))):
+        text = ds[i]["hard_text"]
+        found = PRONOUNS.findall(text)
+        label = ID2PROFESSION.get(ds[i]["profession"], ds[i]["profession"])
+        gender = "M" if ds[i]["gender"] == 0 else "F"
+        pronoun_warn = f"  ⚠ pronouns found: {found}" if found else "  ✓ no pronouns"
+        print(f"[{i}] profession={label} gender={gender}")
+        print(f"     text: {text[:120]}...")
+        print(pronoun_warn)
+
+    # --- 3. Split sizes ---
+    print("\n=== Split sizes ===")
+    for s in ["train", "dev", "test"]:
+        n = len(load_dataset("LabHC/bias_in_bios", split=s))
+        print(f"  {s:6s}: {n:,}")
+
+
 def load_bios(
     batch_size: int = 32,
-    max_len: int = 128,
+    max_len: int = 256,
     min_freq: int = 2,
     subset: float = 1.0,
     model_type: str = "distilbert",

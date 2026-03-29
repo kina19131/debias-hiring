@@ -133,24 +133,27 @@ def train(
         reinit="finish_previous",
     )
 
-    # Epoch-level metrics: x-axis = epoch
+    # W&B section prefixes create grouped panels automatically:
+    #   val/     — validation metrics (accuracy, loss, adversary)
+    #   train/   — training metrics (loss, accuracy per epoch)
+    #   fairness/ — TPR gap, odds gap per epoch
+    #   step/    — per-step loss/acc (high frequency, separate panel)
+    #   prof/    — per-profession fairness breakdown
     run.define_metric("epoch")
-    run.define_metric("val_clf_accuracy",   step_metric="epoch", summary="max")
-    run.define_metric("val_clf_loss",       step_metric="epoch", summary="min")
-    run.define_metric("val_adv_accuracy",   step_metric="epoch", summary="min")
-    run.define_metric("train_clf_loss",     step_metric="epoch", summary="min")
-    run.define_metric("train_adv_loss",     step_metric="epoch", summary="min")
-    run.define_metric("train_clf_accuracy", step_metric="epoch", summary="max")
-    run.define_metric("train_adv_accuracy", step_metric="epoch")
-    run.define_metric("median_opp_gap",     step_metric="epoch", summary="min")
-    run.define_metric("median_odds_gap",    step_metric="epoch", summary="min")
-    run.define_metric("lambda_adv",         step_metric="epoch")
-
-    # Step-level metrics: x-axis = global_step
-    run.define_metric("global_step")
-    run.define_metric("step_clf_loss", step_metric="global_step")
-    run.define_metric("step_adv_loss", step_metric="global_step")
-    run.define_metric("step_clf_acc",  step_metric="global_step")
+    run.define_metric("val/clf_accuracy",   step_metric="epoch", summary="max")
+    run.define_metric("val/clf_loss",       step_metric="epoch", summary="min")
+    run.define_metric("val/adv_accuracy",   step_metric="epoch", summary="min")
+    run.define_metric("train/clf_loss",     step_metric="epoch", summary="min")
+    run.define_metric("train/adv_loss",     step_metric="epoch", summary="min")
+    run.define_metric("train/clf_accuracy", step_metric="epoch", summary="max")
+    run.define_metric("train/adv_accuracy", step_metric="epoch")
+    run.define_metric("fairness/opp_gap",   step_metric="epoch", summary="min")
+    run.define_metric("fairness/odds_gap",  step_metric="epoch", summary="min")
+    run.define_metric("fairness/lambda",    step_metric="epoch")
+    run.define_metric("step/global_step")
+    run.define_metric("step/clf_loss", step_metric="step/global_step")
+    run.define_metric("step/adv_loss", step_metric="step/global_step")
+    run.define_metric("step/clf_acc",  step_metric="step/global_step")
 
     clf_crit = build_clf_criterion(train_loader, device)
     adv_crit = build_adv_criterion()
@@ -214,10 +217,10 @@ def train(
             global_step += 1
             if global_step % log_every == 0:
                 run.log({
-                    "global_step": global_step,
-                    "step_clf_loss": clf_loss.item(),
-                    "step_adv_loss": adv_loss.item() if lambda_val > 0 else 0.0,
-                    "step_clf_acc": (logits.argmax(1) == y_clf).float().mean().item(),
+                    "step/global_step": global_step,
+                    "step/clf_loss": clf_loss.item(),
+                    "step/adv_loss": adv_loss.item() if lambda_val > 0 else 0.0,
+                    "step/clf_acc":  (logits.argmax(1) == y_clf).float().mean().item(),
                 })
 
         # ------------------------------------------------------------------
@@ -255,12 +258,12 @@ def train(
             s["Odd_gap"] for s in eodd_stats if not np.isnan(s["Odd_gap"])
         ])
 
-        # Per-profession W&B logs
+        # Per-profession W&B logs — grouped under prof/ section
         prof_logs = {}
         for s in eopp_stats:
-            prof_logs[f"prof_{s['profession']}_TPR_diff"] = s["TPR_diff"]
+            prof_logs[f"prof/{s['profession']}_tpr_gap"] = s["TPR_diff"]
         for s in eodd_stats:
-            prof_logs[f"prof_{s['profession']}_Odd_gap"] = s["Odd_gap"]
+            prof_logs[f"prof/{s['profession']}_odd_gap"] = s["Odd_gap"]
 
         epoch_secs = time.time() - epoch_start
         epoch_metrics = {
@@ -288,17 +291,17 @@ def train(
         )
 
         run.log({
-            "epoch": epoch + 1,
-            "lambda_adv": lambda_val,
-            "train_clf_loss": tot_clf_loss / len(train_loader),
-            "train_adv_loss": tot_adv_loss / max(1, len(train_loader)),
-            "train_clf_accuracy": tot_clf_ok / tot,
-            "train_adv_accuracy": (tot_adv_ok / tot) if lambda_val > 0 else 0.0,
-            "val_clf_accuracy": val_acc,
-            "val_adv_accuracy": val_adv_acc,
-            "val_clf_loss": val_clf_loss,
-            "median_opp_gap": median_tpr_gap,
-            "median_odds_gap": median_odd_gap,
+            "epoch":                  epoch + 1,
+            "fairness/lambda":        lambda_val,
+            "train/clf_loss":         tot_clf_loss / len(train_loader),
+            "train/adv_loss":         tot_adv_loss / max(1, len(train_loader)),
+            "train/clf_accuracy":     tot_clf_ok / tot,
+            "train/adv_accuracy":     (tot_adv_ok / tot) if lambda_val > 0 else 0.0,
+            "val/clf_accuracy":       val_acc,
+            "val/adv_accuracy":       val_adv_acc,
+            "val/clf_loss":           val_clf_loss,
+            "fairness/opp_gap":       median_tpr_gap,
+            "fairness/odds_gap":      median_odd_gap,
             **prof_logs,
         })
 
@@ -340,12 +343,12 @@ def train(
     os.remove(ckpt_path)
 
     # Surface best-checkpoint values in the W&B runs table
-    run.summary["best_median_opp_gap"]  = best_eo_gap
-    run.summary["best_epoch"]           = best_state["epoch"] + 1
-    run.summary["final_val_clf_accuracy"] = val_acc
-    run.summary["final_val_adv_accuracy"] = val_adv_acc
-    run.summary["final_median_opp_gap"]   = median_tpr_gap
-    run.summary["final_median_odds_gap"]  = median_odd_gap
+    run.summary["best/opp_gap"]        = best_eo_gap
+    run.summary["best/epoch"]          = best_state["epoch"] + 1
+    run.summary["final/val_accuracy"]  = val_acc
+    run.summary["final/adv_accuracy"]  = val_adv_acc
+    run.summary["final/opp_gap"]       = median_tpr_gap
+    run.summary["final/odds_gap"]      = median_odd_gap
 
     # Write structured epoch log — share this file to inspect results
     jsonl_path = f"{tag}_epochs.jsonl"
