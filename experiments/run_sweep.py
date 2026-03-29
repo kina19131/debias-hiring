@@ -51,7 +51,9 @@ def run_experiment(
 
     if model_type == "distilbert":
         model = DistilBertClassifier(num_classes=num_classes).to(device)
-        hidden_dim = model.hidden_dim  # 768
+        # Adversary uses hidden_dim * 2 internally (designed for BiGRU).
+        # DistilBERT [CLS] is 768-dim, so pass 768 // 2 = 384 so that 384*2 = 768.
+        adv_hidden_dim = model.hidden_dim // 2
     else:
         glove_weights = load_glove(vocab, glove_path)
         model = GRUClassifier(
@@ -61,12 +63,12 @@ def run_experiment(
             num_classes=num_classes,
             pretrained_weights=glove_weights,
         ).to(device)
-        hidden_dim = 128 * 2  # BiGRU output
+        adv_hidden_dim = 128  # GRU hidden_dim; adversary does 128*2=256
 
     if adversary_type == "vanilla":
-        adversary = VanillaAdversary(hidden_dim=hidden_dim).to(device)
+        adversary = VanillaAdversary(hidden_dim=adv_hidden_dim).to(device)
     else:
-        adversary = Adversary(hidden_dim=hidden_dim, num_classes=num_classes).to(device)
+        adversary = Adversary(hidden_dim=adv_hidden_dim, num_classes=num_classes).to(device)
 
     return train(
         model=model,
