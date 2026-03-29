@@ -68,17 +68,24 @@ class VanillaAdversary(nn.Module):
 
 class Adversary(nn.Module):
     """
-    Label-conditioned adversary (ours): predicts gender from occupation-conditioned
-    representation.
+    Label-conditioned adversary (ours): predicts gender from h conditioned on
+    occupation label via a learned label embedding.
 
-    Input dimension: hidden_dim * 2 * 3  (= 768 for hidden_dim=128)
-    because adv_input = cat([h, h*label, h*(1-label)]).
+    The adversary sees both the hidden state h and a learned embedding of the
+    occupation class. With gradient reversal, this forces the encoder to make h
+    gender-uninformative *conditional on occupation* — the correct inductive bias
+    for the hiring domain. A surgeon's bio should not leak gender signal even when
+    the adversary knows it's a surgeon's bio.
+
+    Input to net: cat([h, label_embed(y)])  shape: (batch, hidden_dim*2 + label_dim)
     """
 
-    def __init__(self, hidden_dim: int, adv_hidden: int = 64):
+    def __init__(self, hidden_dim: int, num_classes: int = 28,
+                 label_dim: int = 64, adv_hidden: int = 64):
         super().__init__()
+        self.label_embed = nn.Embedding(num_classes, label_dim)
         self.net = nn.Sequential(
-            nn.Linear(hidden_dim * 2 * 3, adv_hidden),
+            nn.Linear(hidden_dim * 2 + label_dim, adv_hidden),
             nn.ReLU(),
             nn.Linear(adv_hidden, 32),
             nn.ReLU(),
@@ -89,16 +96,11 @@ class Adversary(nn.Module):
         """
         Args:
             h:           (batch, hidden_dim * 2) — hidden state from GRUClassifier
-            true_labels: (batch,) or (batch, 1) — integer occupation class ids
+            true_labels: (batch,) — integer occupation class ids (0 to num_classes-1)
 
         Returns:
             logits: (batch,) — raw (pre-sigmoid) gender prediction
         """
-        if true_labels.dim() == 1:
-            true_labels = true_labels.unsqueeze(1)
-        true_labels = true_labels.float().to(h.device)
-
-        h1 = h * true_labels          # occupation-present component
-        h0 = h * (1.0 - true_labels)  # occupation-absent component
-        adv_input = torch.cat([h, h1, h0], dim=1)
+        l = self.label_embed(true_labels.long())      # (batch, label_dim)
+        adv_input = torch.cat([h, l], dim=1)
         return self.net(adv_input).squeeze(1)

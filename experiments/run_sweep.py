@@ -58,7 +58,7 @@ def run_experiment(
     if adversary_type == "vanilla":
         adversary = VanillaAdversary(hidden_dim=128).to(device)
     else:
-        adversary = Adversary(hidden_dim=128).to(device)
+        adversary = Adversary(hidden_dim=128, num_classes=num_classes).to(device)
 
     return train(
         model=model,
