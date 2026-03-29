@@ -134,20 +134,42 @@ def verify_dataset(split="train", n_examples: int = 3) -> None:
     ds = load_dataset("LabHC/bias_in_bios", split=split)
 
     # --- 1. Profession label mapping ---
-    hf_names = ds.features["profession"].names  # HuggingFace ClassLabel order
-    mismatches = []
-    for idx, name in enumerate(hf_names):
-        expected = ID2PROFESSION.get(idx, "MISSING")
-        if name != expected:
-            mismatches.append(f"  id={idx}: HF='{name}' vs code='{expected}'")
-
     print("=== Profession label verification ===")
-    if mismatches:
-        print("MISMATCH — ID2PROFESSION is wrong! Fix before running experiments:")
-        for m in mismatches:
-            print(m)
+    feat = ds.features["profession"]
+    if hasattr(feat, "names"):
+        # ClassLabel: verify ordered mapping directly
+        hf_names = feat.names
+        mismatches = [
+            f"  id={i}: HF='{hf_names[i]}' vs code='{ID2PROFESSION.get(i)}'"
+            for i in range(len(hf_names))
+            if hf_names[i] != ID2PROFESSION.get(i)
+        ]
+        if mismatches:
+            print("MISMATCH — ID2PROFESSION is wrong! Fix before running experiments:")
+            for m in mismatches:
+                print(m)
+        else:
+            print(f"OK — all {len(hf_names)} profession ClassLabels match ID2PROFESSION")
     else:
-        print(f"OK — all {len(hf_names)} profession labels match ID2PROFESSION")
+        # Plain integer Value: verify the observed integer range and spot-check
+        unique_ids = sorted(set(ds["profession"]))
+        expected_ids = sorted(ID2PROFESSION.keys())
+        if unique_ids == expected_ids:
+            print(f"OK — profession is integer Value, ids {min(unique_ids)}–{max(unique_ids)} "
+                  f"match ID2PROFESSION keys ({len(unique_ids)} classes)")
+        else:
+            missing = set(expected_ids) - set(unique_ids)
+            extra   = set(unique_ids) - set(expected_ids)
+            print(f"WARNING — id mismatch: missing={missing}  extra={extra}")
+        # Spot-check a few examples so we can visually verify the mapping
+        print("Spot-check (profession_id → bio excerpt):")
+        seen = set()
+        for row in ds:
+            pid = row["profession"]
+            if pid not in seen and len(seen) < 4:
+                seen.add(pid)
+                print(f"  id={pid:2d} ({ID2PROFESSION.get(pid,'?'):20s}) | "
+                      f"{row['hard_text'][:80]}...")
 
     # --- 2. hard_text pronoun check ---
     PRONOUNS = re.compile(r'\b(he|she|his|her|him|himself|herself|they|their|them)\b', re.I)
