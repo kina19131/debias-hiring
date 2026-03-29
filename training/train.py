@@ -102,6 +102,7 @@ def train(
     seed: int = 42,
     adversary_type: str = "label_conditioned",
     log_every: int = 200,
+    checkpoint_dir: str = "",
 ) -> dict:
     """
     Train GRUClassifier with the label-conditioned adversary.
@@ -115,9 +116,20 @@ def train(
     set_seed(seed)
 
     tag = f"{adversary_type}_{'baseline' if max_lambda == 0 else f'lam{max_lambda:.2f}'}"
+
+    # Check for a resume checkpoint before wandb.init so we can rejoin the same run
+    resume_path = os.path.join(checkpoint_dir, f"{tag}_resume.pth") if checkpoint_dir else ""
+    wandb_run_id = None
+    if resume_path and os.path.exists(resume_path):
+        _ckpt_peek = torch.load(resume_path, map_location="cpu")
+        wandb_run_id = _ckpt_peek.get("wandb_run_id")
+        del _ckpt_peek
+
     run = wandb.init(
         project=wandb_project,
         name=tag,
+        id=wandb_run_id,
+        resume="allow" if wandb_run_id else None,
         config=dict(
             epochs=epochs,
             batch_size=train_loader.batch_size,
@@ -130,7 +142,7 @@ def train(
             seed=seed,
             adversary_type=adversary_type,
         ),
-        reinit="finish_previous",
+        reinit="finish_previous" if not wandb_run_id else False,
     )
 
     # W&B section prefixes create grouped panels automatically:
@@ -165,8 +177,26 @@ def train(
     best_state = None
     global_step = 0
     epoch_log = []  # accumulates one dict per epoch for the JSONL file
+    start_epoch = 0
 
-    for epoch in range(epochs):
+    # ------------------------------------------------------------------
+    # Resume from per-epoch checkpoint if one exists
+    # ------------------------------------------------------------------
+    if resume_path and os.path.exists(resume_path):
+        logging.info(f"Resuming from {resume_path}")
+        ckpt = torch.load(resume_path, map_location=device)
+        model.load_state_dict(ckpt["model"])
+        adversary.load_state_dict(ckpt["adversary"])
+        optim_clf.load_state_dict(ckpt["optim_clf"])
+        optim_adv.load_state_dict(ckpt["optim_adv"])
+        start_epoch  = ckpt["epoch"] + 1
+        global_step  = ckpt["global_step"]
+        best_eo_gap  = ckpt["best_eo_gap"]
+        best_state   = ckpt["best_state"]
+        epoch_log    = ckpt["epoch_log"]
+        logging.info(f"Resumed at epoch {start_epoch}, best_eo_gap={best_eo_gap:.4f}")
+
+    for epoch in range(start_epoch, epochs):
         lambda_val = min(max_lambda, (epoch / max(warmup_epochs, 1)) * max_lambda)
         model.train()
         adversary.train()
@@ -316,14 +346,37 @@ def train(
                 "eo_gap": best_eo_gap,
             }
 
+        # Save per-epoch resume checkpoint so training can continue after a crash
+        if resume_path:
+            torch.save({
+                "model":        {k: v.cpu() for k, v in model.state_dict().items()},
+                "adversary":    {k: v.cpu() for k, v in adversary.state_dict().items()},
+                "optim_clf":    optim_clf.state_dict(),
+                "optim_adv":    optim_adv.state_dict(),
+                "epoch":        epoch,
+                "global_step":  global_step,
+                "best_eo_gap":  best_eo_gap,
+                "best_state":   best_state,
+                "epoch_log":    epoch_log,
+                "wandb_run_id": run.id,
+            }, resume_path)
+            logging.info(f"Resume checkpoint saved → {resume_path} (epoch {epoch + 1})")
+
     # ------------------------------------------------------------------
     # Save and log best checkpoint
     # ------------------------------------------------------------------
     model.load_state_dict({k: v.to(device) for k, v in best_state["model"].items()})
     adversary.load_state_dict({k: v.to(device) for k, v in best_state["adversary"].items()})
 
-    ckpt_path = f"{tag}_checkpoint.pth"
+    # Save checkpoint locally (persistent) if checkpoint_dir is provided,
+    # otherwise save next to the script and clean up after W&B upload.
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        ckpt_path = os.path.join(checkpoint_dir, f"{tag}_best.pth")
+    else:
+        ckpt_path = f"{tag}_checkpoint.pth"
     torch.save(best_state, ckpt_path)
+    logging.info(f"Checkpoint saved → {ckpt_path}")
 
     art_name = f"joint_model_{tag}"
     artifact = wandb.Artifact(
@@ -340,7 +393,14 @@ def train(
     )
     artifact.add_file(ckpt_path)
     run.log_artifact(artifact, aliases=["latest", tag])
-    os.remove(ckpt_path)
+    # Only clean up temp file if we didn't write to a persistent checkpoint_dir
+    if not checkpoint_dir:
+        os.remove(ckpt_path)
+
+    # Remove resume checkpoint — run completed successfully, no need to resume
+    if resume_path and os.path.exists(resume_path):
+        os.remove(resume_path)
+        logging.info(f"Resume checkpoint removed (run complete): {resume_path}")
 
     # Surface best-checkpoint values in the W&B runs table
     run.summary["best/opp_gap"]        = best_eo_gap

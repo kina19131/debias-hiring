@@ -43,6 +43,7 @@ def run_experiment(
     # GRU-only options (ignored when model_type="distilbert")
     vocab: dict = None,
     glove_path: str = "",
+    checkpoint_dir: str = "",
 ) -> dict:
     print(f"\n--- λ = {lambda_val}  adversary = {adversary_type}  backbone = {model_type} ---")
     set_seed(seed)
@@ -85,6 +86,7 @@ def run_experiment(
         wandb_project=wandb_project,
         seed=seed,
         adversary_type=adversary_type,
+        checkpoint_dir=checkpoint_dir,
     )
 
 
@@ -104,6 +106,14 @@ def main():
                         help="GRU only — ignored when --model-type=distilbert.")
     parser.add_argument("--wandb-project", type=str, default="debias-hiring")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--checkpoint-dir", type=str, default="/kaggle/working/checkpoints",
+        help="Directory to save best checkpoints. Files persist across Kaggle sessions.",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Skip lambda values whose epoch log (.jsonl) already exists in checkpoint-dir.",
+    )
     parser.add_argument(
         "--adversary-type",
         choices=["label_conditioned", "vanilla"],
@@ -146,8 +156,25 @@ def main():
         f"max_len: {args.max_len}"
     )
 
+    import os as _os
     results = {}
     for lam in LAMBDA_VALUES:
+        tag = f"{args.adversary_type}_{'baseline' if lam == 0 else f'lam{lam:.2f}'}"
+        jsonl_path = f"{tag}_epochs.jsonl"
+        if args.resume and _os.path.exists(jsonl_path):
+            logging.info(f"λ={lam} — found {jsonl_path}, skipping (--resume).")
+            # Re-load last epoch metrics so the summary table is complete
+            import json as _json
+            with open(jsonl_path) as _f:
+                rows = [_json.loads(l) for l in _f]
+            last = rows[-1]
+            results[lam] = {
+                "val_clf_accuracy": last["val_clf_accuracy"],
+                "median_tpr_gap":   last["median_opp_gap"],
+                "median_odd_gap":   last["median_odds_gap"],
+            }
+            continue
+
         r = run_experiment(
             lambda_val=lam,
             train_loader=train_loader,
@@ -164,6 +191,7 @@ def main():
             model_type=args.model_type,
             vocab=vocab_or_tok if args.model_type == "gru" else None,
             glove_path=args.glove_path,
+            checkpoint_dir=args.checkpoint_dir,
         )
         # Store only metrics — drop model objects so GPU memory is freed
         results[lam] = {k: v for k, v in r.items() if k not in ("model", "adversary")}

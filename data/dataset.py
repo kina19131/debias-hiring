@@ -171,18 +171,20 @@ def verify_dataset(split="train", n_examples: int = 3) -> None:
                 print(f"  id={pid:2d} ({ID2PROFESSION.get(pid,'?'):20s}) | "
                       f"{row['hard_text'][:80]}...")
 
-    # --- 2. hard_text pronoun check ---
-    PRONOUNS = re.compile(r'\b(he|she|his|her|him|himself|herself|they|their|them)\b', re.I)
-    print("\n=== hard_text samples (should have no gendered pronouns) ===")
+    # --- 2. hard_text field check ---
+    # hard_text removes personal names only — gendered pronouns (he/she/his/her)
+    # are intentionally retained. This is expected for this dataset version.
+    NAME_PATTERN = re.compile(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b')  # rough full-name detector
+    print("\n=== hard_text samples (names removed, pronouns retained as expected) ===")
     for i in range(min(n_examples, len(ds))):
         text = ds[i]["hard_text"]
-        found = PRONOUNS.findall(text)
+        names_found = NAME_PATTERN.findall(text)
         label = ID2PROFESSION.get(ds[i]["profession"], ds[i]["profession"])
         gender = "M" if ds[i]["gender"] == 0 else "F"
-        pronoun_warn = f"  ⚠ pronouns found: {found}" if found else "  ✓ no pronouns"
-        print(f"[{i}] profession={label} gender={gender}")
-        print(f"     text: {text[:120]}...")
-        print(pronoun_warn)
+        print(f"[{i}] profession={label:20s} gender={gender}")
+        print(f"     {text[:120]}...")
+        if names_found:
+            print(f"     ⚠  possible names still present: {names_found[:3]}")
 
     # --- 3. Split sizes ---
     print("\n=== Split sizes ===")
