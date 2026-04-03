@@ -117,9 +117,20 @@ def train(
 
     tag = f"{adversary_type}_{'baseline' if max_lambda == 0 else f'lam{max_lambda:.2f}'}"
 
-    # Check for a resume checkpoint before wandb.init so we can rejoin the same run
+    # Check for a resume checkpoint — local first, then W&B artifact fallback
     resume_path = os.path.join(checkpoint_dir, f"{tag}_resume.pth") if checkpoint_dir else ""
     wandb_run_id = None
+    if resume_path and not os.path.exists(resume_path) and checkpoint_dir:
+        # Local file missing — try to pull from W&B (e.g. after session loss)
+        try:
+            import wandb as _wandb
+            api = _wandb.Api()
+            art = api.artifact(f"{os.environ.get('WANDB_ENTITY', api.default_entity)}/{wandb_project}/{tag}_resume:resume_latest")
+            art.download(root=checkpoint_dir)
+            logging.info(f"Pulled resume checkpoint from W&B artifact → {resume_path}")
+        except Exception as e:
+            logging.info(f"No W&B resume checkpoint found ({e}), starting fresh.")
+
     if resume_path and os.path.exists(resume_path):
         _ckpt_peek = torch.load(resume_path, map_location="cpu")
         wandb_run_id = _ckpt_peek.get("wandb_run_id")
@@ -376,6 +387,17 @@ def train(
                 "wandb_run_id": run.id,
             }, resume_path)
             logging.info(f"Resume checkpoint saved → {resume_path} (epoch {epoch + 1})")
+
+            # ── upload resume checkpoint to W&B so it survives session loss ──
+            resume_art = wandb.Artifact(
+                name=f"{tag}_resume",
+                type="resume-checkpoint",
+                metadata={"epoch": epoch, "global_step": global_step},
+            )
+            resume_art.add_file(resume_path)
+            run.log_artifact(resume_art, aliases=["resume_latest"])
+            resume_art.wait()  # block until upload confirmed before moving on
+            # ──────────────────────────────────────────────────────────────────────
 
     # ------------------------------------------------------------------
     # Save and log best checkpoint
