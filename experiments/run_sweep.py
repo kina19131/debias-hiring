@@ -23,7 +23,8 @@ from models.embeddings import load_glove
 from training.train import train, set_seed
 
 
-LAMBDA_VALUES = [0.0, 0.25, 0.5, 0.75, 1.0]
+# Default lambda grid — finer resolution around the collapse region (0.25–0.75)
+LAMBDA_VALUES = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0]
 
 
 def run_experiment(
@@ -44,6 +45,7 @@ def run_experiment(
     vocab: dict = None,
     glove_path: str = "",
     checkpoint_dir: str = "",
+    adv_hidden_override: int = 0,   # 0 = use default derived from backbone
 ) -> dict:
     print(f"\n--- λ = {lambda_val}  adversary = {adversary_type}  backbone = {model_type} ---")
     set_seed(seed)
@@ -65,6 +67,10 @@ def run_experiment(
             pretrained_weights=glove_weights,
         ).to(device)
         adv_hidden_dim = 128  # GRU hidden_dim; adversary does 128*2=256
+
+    # Capacity sweep override: replace default adv_hidden_dim
+    if adv_hidden_override > 0:
+        adv_hidden_dim = adv_hidden_override
 
     if adversary_type == "vanilla":
         adversary = VanillaAdversary(hidden_dim=adv_hidden_dim).to(device)
@@ -126,6 +132,17 @@ def main():
         default="distilbert",
         help="Backbone: 'distilbert' (default) or 'gru' (lightweight ablation)",
     )
+    parser.add_argument(
+        "--lambda-values", type=float, nargs="+", default=None,
+        help="Override lambda grid, e.g. --lambda-values 0 0.1 0.25 0.5 1.0 2.0",
+    )
+    parser.add_argument(
+        "--adv-hidden-sweep", type=int, nargs="+", default=None,
+        metavar="DIM",
+        help="Run a capacity sweep: train one model per adversary hidden dim at a fixed lambda. "
+             "Requires exactly one value in --lambda-values, e.g. "
+             "--adv-hidden-sweep 32 64 128 256 384 --lambda-values 0.5",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -157,14 +174,52 @@ def main():
     )
 
     import os as _os
+    import json as _json
+
+    lambda_grid = args.lambda_values if args.lambda_values is not None else LAMBDA_VALUES
+
+    # Capacity sweep: iterate over adversary hidden dims at fixed lambda(s)
+    # Produces run names like vanilla_lam0.50_cap128
+    if args.adv_hidden_sweep:
+        cap_results = {}
+        for cap in args.adv_hidden_sweep:
+            for lam in lambda_grid:
+                cap_tag = f"cap{cap}_lam{lam:.2f}"
+                r = run_experiment(
+                    lambda_val=lam,
+                    train_loader=train_loader,
+                    valid_loader=valid_loader,
+                    id2profession=id2profession,
+                    device=device,
+                    epochs=args.epochs,
+                    warmup_epochs=args.warmup_epochs,
+                    lr=args.lr,
+                    lr_adv=args.lr_adv,
+                    wandb_project=args.wandb_project,
+                    seed=args.seed,
+                    adversary_type=args.adversary_type,
+                    model_type=args.model_type,
+                    vocab=vocab_or_tok if args.model_type == "gru" else None,
+                    glove_path=args.glove_path,
+                    checkpoint_dir=args.checkpoint_dir,
+                    adv_hidden_override=cap,
+                )
+                cap_results[cap_tag] = {k: v for k, v in r.items() if k not in ("model", "adversary")}
+                del r
+                gc.collect()
+                torch.cuda.empty_cache()
+        logging.info("\n=== Capacity sweep complete ===")
+        logging.info(f"{'tag':>20}  {'val_acc':>8}  {'tpr_gap':>8}")
+        for tag, r in cap_results.items():
+            logging.info(f"{tag:>20}  {r['val_clf_accuracy']:>8.4f}  {r['median_tpr_gap']:>8.4f}")
+        return
+
     results = {}
-    for lam in LAMBDA_VALUES:
+    for lam in lambda_grid:
         tag = f"{args.adversary_type}_{'baseline' if lam == 0 else f'lam{lam:.2f}'}"
         jsonl_path = f"{tag}_epochs.jsonl"
         if args.resume and _os.path.exists(jsonl_path):
             logging.info(f"λ={lam} — found {jsonl_path}, skipping (--resume).")
-            # Re-load last epoch metrics so the summary table is complete
-            import json as _json
             with open(jsonl_path) as _f:
                 rows = [_json.loads(l) for l in _f]
             last = rows[-1]

@@ -51,10 +51,14 @@ def _collect_predictions(model, dataloader, device, input_ids_transform=None):
             if input_ids_transform is not None:
                 input_ids = input_ids_transform(input_ids)
 
+            attn = batch.get("attention_mask")
+            if attn is not None:
+                attn = attn.to(device)
+
             labels = batch["label"].to(device)
             gender = batch["gender"].to(device)
 
-            logits, h = model(input_ids)
+            logits, h = model(input_ids, attn)
             y_trues.append(labels.cpu())
             y_preds.append(logits.argmax(1).cpu())
             genders_all.append(gender.cpu())

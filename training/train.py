@@ -229,6 +229,17 @@ def train(
                 total_loss = clf_loss + adv_loss
 
             total_loss.backward()
+
+            # Capture gradient norms BEFORE clipping — raw signal for collapse analysis
+            clf_grad_norm = sum(
+                p.grad.norm().item() ** 2
+                for p in model.parameters() if p.grad is not None
+            ) ** 0.5
+            adv_grad_norm = sum(
+                p.grad.norm().item() ** 2
+                for p in adversary.parameters() if p.grad is not None
+            ) ** 0.5 if lambda_val > 0 else 0.0
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optim_clf.step()
 
@@ -247,10 +258,14 @@ def train(
             global_step += 1
             if global_step % log_every == 0:
                 run.log({
-                    "step/global_step": global_step,
-                    "step/clf_loss": clf_loss.item(),
-                    "step/adv_loss": adv_loss.item() if lambda_val > 0 else 0.0,
-                    "step/clf_acc":  (logits.argmax(1) == y_clf).float().mean().item(),
+                    "step/global_step":    global_step,
+                    "step/clf_loss":       clf_loss.item(),
+                    "step/adv_loss":       adv_loss.item() if lambda_val > 0 else 0.0,
+                    "step/clf_acc":        (logits.argmax(1) == y_clf).float().mean().item(),
+                    # Gradient norm ratio: >1 means adversary is dominating the encoder
+                    "step/clf_grad_norm":  clf_grad_norm,
+                    "step/adv_grad_norm":  adv_grad_norm,
+                    "step/grad_ratio":     adv_grad_norm / (clf_grad_norm + 1e-8),
                 })
 
         # ------------------------------------------------------------------
