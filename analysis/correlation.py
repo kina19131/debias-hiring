@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from data.dataset import load_bios
+from data.dataset import ID2PROFESSION
 
 
 # ---------------------------------------------------------------------------
@@ -57,16 +57,7 @@ def compute_correlation(split: str = "train") -> pd.DataFrame:
     profession_ids = list(ds["profession"])
     genders        = list(ds["gender"])          # 0=male, 1=female
 
-    # Build label mapping — handle both ClassLabel and integer Value types
-    try:
-        id2profession = {i: ds.features["profession"].names[i]
-                         for i in range(len(ds.features["profession"].names))}
-    except AttributeError:
-        unique_ids = sorted(set(profession_ids))
-        id2profession = {i: str(i) for i in unique_ids}
-
     rows = []
-    N = len(profession_ids)
     for prof_id, prof_name in id2profession.items():
         in_prof  = np.array([1 if p == prof_id else 0 for p in profession_ids])
         gender   = np.array(genders)
