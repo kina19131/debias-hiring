@@ -58,7 +58,7 @@ def compute_correlation(split: str = "train") -> pd.DataFrame:
     genders        = list(ds["gender"])          # 0=male, 1=female
 
     rows = []
-    for prof_id, prof_name in id2profession.items():
+    for prof_id, prof_name in ID2PROFESSION.items():
         in_prof  = np.array([1 if p == prof_id else 0 for p in profession_ids])
         gender   = np.array(genders)
 
@@ -99,7 +99,7 @@ def compute_correlation(split: str = "train") -> pd.DataFrame:
 
 def plot_cramer_v(df: pd.DataFrame, out_path: str) -> None:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig, ax = plt.subplots(figsize=(14, 5))
+    _, ax = plt.subplots(figsize=(14, 5))
     colors = ["#c0392b" if v > 0.15 else "#2980b9" for v in df["cramer_v"]]
     ax.bar(df["profession"], df["cramer_v"], color=colors)
     ax.axhline(0.15, color="gray", linestyle="--", linewidth=0.8, label="V=0.15 threshold")
@@ -117,8 +117,8 @@ def plot_pct_female(df: pd.DataFrame, out_path: str) -> None:
     """Horizontal bar chart: % female per profession, sorted."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df_sorted = df.sort_values("pct_female", ascending=True)
-    fig, ax = plt.subplots(figsize=(6, 10))
-    bars = ax.barh(df_sorted["profession"], df_sorted["pct_female"],
+    _, ax = plt.subplots(figsize=(6, 10))
+    ax.barh(df_sorted["profession"], df_sorted["pct_female"],
                    color=["#e74c3c" if p > 0.5 else "#3498db" for p in df_sorted["pct_female"]])
     ax.axvline(0.5, color="gray", linestyle="--", linewidth=0.8)
     ax.set_xlabel("% Female")
